@@ -1,0 +1,184 @@
+<script src="[https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js](https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js)"></script>
+<script>!function(){"use strict";
+const e="grps-gemini-kunci",t="grps-gemini-model",a="grps-arsip-v1",n="gemini-1.5-flash",
+i=e=>{try{return localStorage.getItem(e)||""}catch(e){return""}},
+r=(e,t)=>{try{localStorage.setItem(e,t)}catch(e){}},
+o=(e,t,a)=>Object.assign({code:e,message:t},a?{text:a}:{});
+
+async function s(a,r,s){
+  r=r||{};
+  const l="string"==typeof a?[{role:"user",content:a}]:Array.isArray(a)?a:[];
+  if(!l.length)throw o("invalid_request","Masukan kosong.");
+  const d=i(e);
+  if(!d)throw o("not_granted","Kunci API Gemini belum dipasang.");
+  const c=i(t)||n;
+  const u={
+    contents:l.map((e=>({role:"assistant"===e.role?"model":"user",parts:[{text:String(e.content)}]}))),
+    generationConfig:Object.assign({temperature:0.2,maxOutputTokens:8192},s?{responseMimeType:"application/json"}:{}),
+    safetySettings:[
+      {category:"HARM_CATEGORY_DANGEROUS_CONTENT",threshold:"BLOCK_NONE"},
+      {category:"HARM_CATEGORY_HARASSMENT",threshold:"BLOCK_NONE"},
+      {category:"HARM_CATEGORY_HATE_SPEECH",threshold:"BLOCK_NONE"},
+      {category:"HARM_CATEGORY_SEXUALLY_EXPLICIT",threshold:"BLOCK_NONE"}
+    ]
+  };
+  let m;
+  try{
+    m=await fetch("[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)"+encodeURIComponent(c)+":generateContent?key="+encodeURIComponent(d),{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(u),
+      signal:r.signal
+    });
+  }catch(e){
+    if(e&&"AbortError"===e.name)throw o("cancelled","Dihentikan.");
+    throw o("upstream_error","Tidak dapat menghubungi Gemini API. Periksa koneksi internet.");
+  }
+  let p=null;
+  try{p=await m.json()}catch(e){}
+  if(!m.ok){
+    const errText=p&&p.error&&p.error.message||"HTTP "+m.status;
+    if(400===m.status||401===m.status||403===m.status){
+      if(/api key|API_KEY/i.test(errText))throw o("not_granted",errText);
+      throw o("invalid_request",errText);
+    }
+    if(429===m.status)throw o("rate_limited",errText);
+    if(404===m.status)throw o("invalid_request",'Model "'+c+'" tidak ditemukan. Gunakan gemini-1.5-flash.');
+    throw o("upstream_error",errText);
+  }
+  const g=p&&p.candidates&&p.candidates[0];
+  if(!g)throw o(p&&p.promptFeedback&&p.promptFeedback.blockReason?"refused":"empty_completion","Tidak ada respons dari Gemini.");
+  const k=(g.content&&g.content.parts||[]).map((e=>e.text||"")).join("");
+  if(!k.trim())throw o("SAFETY"===g.finishReason?"refused":"empty_completion","Respons kosong dari Gemini.");
+  if("function"==typeof r.onText)try{r.onText({text:k,delta:k})}catch(e){}
+  return{text:k,truncated:"MAX_TOKENS"===g.finishReason};
+}
+
+const l=(e,t)=>s(e,t,!1);
+l.json=async(e,t)=>{
+  const a=await s(e,t,!0);
+  return function(e){
+    try{return JSON.parse(e)}catch(err){}
+    const t=/```(?:json)?\s*([\s\S]*?)```/.exec(e);
+    if(t)try{return JSON.parse(t[1])}catch(err){}
+    const a=e.search(/[\[{]/),n=Math.max(e.lastIndexOf("}"),e.lastIndexOf("]"));
+    if(a>=0&&n>a)try{return JSON.parse(e.slice(a,n+1))}catch(err){}
+    throw o("invalid_json","Jawaban bukan JSON yang valid.",e);
+  }(a.text);
+};
+l.limits=async()=>({maxPromptBytes:1e6});
+
+const d=()=>{try{return JSON.parse(localStorage.getItem(a)||"{}")}catch(e){return{}}},
+c=e=>{try{localStorage.setItem(a,JSON.stringify(e))}catch(e){throw o("quota_exceeded","Penyimpanan peramban penuh. Hapus RPS lama dari arsip.")}},
+u=e=>null==e?e:JSON.parse(JSON.stringify(e));
+
+function m(e,t){return{id:t,path:e+"/"+t,get:async()=>{const a=d(),n=a[e]&&a[e][t];return{id:t,exists:!!n,data:()=>u(n),metadata:{}}},set:async a=>{const n=d();(n[e]=n[e]||{})[t]=u(a),c(n)},update:async a=>{const n=d();if(!n[e]||!n[e][t])throw o("invalid_argument","Dokumen tidak ada.");Object.assign(n[e][t],u(a)),c(n)},delete:async()=>{const a=d();a[e]&&(delete a[e][t],c(a))}}}
+function p(e,t){t=t||[];return{path:e,where:(a,n,i)=>p(e,t.concat([[a,n,i]])),orderBy:()=>p(e,t),limit:()=>p(e,t),doc:t=>m(e,t||Math.random().toString(36).slice(2)),add:async t=>{const a=m(e,Math.random().toString(36).slice(2));return await a.set(t),a},get:async()=>{const a=d()[e]||{},n=Object.keys(a).filter((e=>t.every((([t,n,i])=>"=="!==n||a[e][t]===i)))).map((e=>({id:e,exists:!0,data:()=>u(a[e]),metadata:{}})));return{docs:n,size:n.length,empty:!n.length}}}}
+const g={collection:e=>p(e),doc:e=>{const t=e.lastIndexOf("/");return m(e.slice(0,t),e.slice(t+1))}},
+k="grps-lisensi",f="grps-lisensi-jejak",
+b={kty:"EC",crv:"P-256",x:"EgoVLLwE958aHI_gVs4duV_gtY2N3U3geAfa7nTVfhI",y:"wyGlgBlN_dSNUq1NSyH4BD1M668DZfH-VVRCbkOoL2Y"},
+y=e=>(e=e.replace(/-/g,"+").replace(/_/g,"/"),e+="=".repeat((4-e.length%4)%4),Uint8Array.from(atob(e),(e=>e.charCodeAt(0)))),
+h=()=>{const e=new Date;return e.getFullYear()+"-"+String(e.getMonth()+1).padStart(2,"0")+"-"+String(e.getDate()).padStart(2,"0")},
+x=e=>{const t=String(e).split("-");return 3===t.length?+t[2]+" "+["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"][+t[1]-1]+" "+t[0]:e};
+let S,w=null;const v=new Promise((e=>{S=e}));
+
+async function O(e,t){
+  e=String(e||"").replace(/\s+/g,""),t=String(t||"").trim().toLowerCase();
+  const a=e.split(".");
+  if(3!==a.length||"GRPS1"!==a[0])return{ok:!1,alasan:"Format kode aktivasi tidak dikenali."};
+  if(!window.crypto||!crypto.subtle)return{ok:!1,alasan:"Peramban tidak mendukung kriptografi WebCrypto."};
+  let n,o=!1;
+  try{
+    const e=await crypto.subtle.importKey("jwk",b,{name:"ECDSA",namedCurve:"P-256"},!1,["verify"]);
+    o=await crypto.subtle.verify({name:"ECDSA",hash:"SHA-256"},e,y(a[2]),(new TextEncoder).encode(a[1]));
+    n=JSON.parse((new TextDecoder).decode(y(a[1])));
+  }catch(err){return{ok:!1,alasan:"Kode aktivasi tidak valid."}}
+  if(!(o&&n&&n.e&&n.x))return{ok:!1,alasan:"Kode aktivasi tidak sah."};
+  if(String(n.e).toLowerCase()!==t)return{ok:!1,alasan:"Kode tidak cocok dengan email."};
+  const s=h();let l=i(f);
+  if(l&&s<l)return{ok:!1,data:n,alasan:"Tanggal sistem tidak valid."};
+  if(s>n.x)return{ok:!1,data:n,kedaluwarsa:!0,alasan:"Masa berlaku kode habis pada "+x(n.x)};
+  r(f,s);return{ok:!0,data:n,kode:e};
+}
+
+function C(){
+  if(document.getElementById("gerbang-lisensi"))return;
+  const e=document.createElement("div");e.id="gerbang-lisensi";
+  e.innerHTML='<style>#gerbang-lisensi{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:16px;background:#f4f6f3;color:#1d2a1f;font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;overflow:auto}#gerbang-lisensi .kartu{width:min(460px,100%);background:#fff;border:1px solid #d5dccf;border-radius:14px;padding:24px;box-shadow:0 8px 30px rgba(0,0,0,.08)}#gerbang-lisensi h2{margin:0 0 4px;font-size:22px}#gerbang-lisensi .sub{margin:0 0 16px;color:#5a6a5c;font-size:14px}#gerbang-lisensi label{display:block;font-size:14px;font-weight:600;margin:12px 0 4px}#gerbang-lisensi input,#gerbang-lisensi textarea{width:100%;box-sizing:border-box;font:inherit;font-size:15px;padding:10px;border:1px solid #c3ccbd;border-radius:8px;background:#fff;color:inherit}#gerbang-lisensi textarea{min-height:96px;font-family:ui-monospace,Consolas,monospace;font-size:13px;word-break:break-all}#gerbang-lisensi button{margin-top:16px;width:100%;padding:11px;font:inherit;font-weight:600;border:0;border-radius:8px;background:#2f6b3a;color:#fff;cursor:pointer}#gerbang-lisensi .pesan{margin:12px 0 0;font-size:14px;color:#a3321f;min-height:1em}#gerbang-lisensi .ket{margin:16px 0 0;font-size:13px;color:#5a6a5c}</style><form class="kartu" novalidate><h2>Generator RPS</h2><p class="sub">Universitas Tadulako · Format RPS OBE SDG\'s 2026</p><p style="margin:0">Aplikasi ini memerlukan kode aktivasi.</p><label for="lis-email">Email penerima lisensi</label><input type="email" id="lis-email" autocomplete="email"><label for="lis-kode">Kode aktivasi</label><textarea id="lis-kode" spellcheck="false" placeholder="GRPS1.…"></textarea><button type="submit">Aktifkan</button><p class="pesan" role="alert"></p></form>';
+  (document.body||document.documentElement).appendChild(e);
+  const t=e.querySelector("form"),a=e.querySelector(".pesan"),n=(()=>{try{return JSON.parse(i(k)||"null")}catch(e){return null}})();
+  if(n&&n.email)e.querySelector("#lis-email").value=n.email;
+  t.addEventListener("submit",(async t=>{
+    t.preventDefault();a.textContent="Memeriksa…";
+    const n=e.querySelector("#lis-email").value,s=await O(e.querySelector("#lis-kode").value,n);
+    if(s.ok){r(k,JSON.stringify({email:n.trim().toLowerCase(),kode:s.kode}));E(s.data);}else a.textContent=s.alasan;
+  }));
+}
+
+function E(e){
+  w=e;const t=document.getElementById("gerbang-lisensi");if(t)t.remove();
+  const a=document.querySelector(".hakcipta");
+  if(a&&!document.getElementById("lis-info")){
+    const t=document.createElement("div");t.id="lis-info";
+    t.style.cssText="font-size:12px;opacity:.8";
+    t.textContent="Dilisensikan kepada "+(e.n||e.e)+" ("+e.e+") · berlaku s.d. "+x(e.x);
+    a.appendChild(t);
+  }
+  S();
+}
+
+async function I(){
+  let e=null;try{e=JSON.parse(i(k)||"null")}catch(err){}
+  if(e&&e.kode){
+    const t=await O(e.kode,e.email);
+    if(t.ok)return E(t.data);
+  }
+  C();
+}
+
+const j=e=>async(...t)=>{
+  if(!(w&&h()<=w.x))throw o("not_granted","Lisensi Generator RPS tidak aktif.");
+  return e(...t);
+};
+const L=j(l);L.json=j(l.json);L.limits=l.limits;
+const P={
+  sample:L,
+  downloads:{save:j((async({filename:e,data:t})=>{
+    const a=t instanceof Blob?t:new Blob([t]),n=URL.createObjectURL(a),i=document.createElement("a");
+    i.href=n;i.download=e;document.body.appendChild(i);i.click();i.remove();
+    setTimeout((()=>URL.revokeObjectURL(n)),4e3);
+    return{status:"saved"};
+  }))},
+  db:g,
+  user:{id:async()=>"lokal",isOwner:()=>!0,canEdit:()=>!0,can:()=>!0}
+};
+
+function M(){
+  const a=document.querySelector("header.top .row");
+  if(!a||document.getElementById("btn-gemini"))return;
+  const o=document.createElement("button");
+  o.id="btn-gemini";o.type="button";
+  const s=()=>{o.textContent=i(e)?"Gemini: Kunci Aktif":"Pasang Kunci API Gemini"};
+  s();a.insertBefore(o,a.firstChild);
+  const l=document.createElement("dialog");
+  l.id="dlg-gemini";
+  l.innerHTML='<form method="dialog" style="display:flex;flex-direction:column;gap:12px;min-width:min(420px,80vw)"><h2 style="margin:0">Pengaturan Gemini</h2><label class="f" for="f-gem-kunci"><span>Kunci API Gemini</span><input type="text" id="f-gem-kunci" autocomplete="off" placeholder="AIzaSy..."></label><label class="f" for="f-gem-model"><span>Model</span><input type="text" id="f-gem-model" placeholder="gemini-1.5-flash"></label><div class="row" style="justify-content:flex-end"><button value="batal">Batal</button><button value="ok" class="utama">Simpan</button></div></form>';
+  document.body.appendChild(l);
+  o.onclick=()=>{
+    l.querySelector("#f-gem-kunci").value=i(e);
+    l.querySelector("#f-gem-model").value=i(t)||n;
+    l.showModal();
+  };
+  l.addEventListener("close",(()=>{
+    if("ok"===l.returnValue){
+      r(e,l.querySelector("#f-gem-kunci").value.trim());
+      r(t,l.querySelector("#f-gem-model").value.trim()||n);
+      s();
+    }
+  }));
+}
+
+window.claude={use:e=>v.then((()=>P[e]||null))};
+"loading"===document.readyState?document.addEventListener("DOMContentLoaded",I):I();
+"loading"===document.readyState?document.addEventListener("DOMContentLoaded",M):M();
+}();</script>
